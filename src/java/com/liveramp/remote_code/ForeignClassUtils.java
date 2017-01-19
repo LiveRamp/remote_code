@@ -7,18 +7,23 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
-import java.lang.reflect.InvocationTargetException;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import javassist.ClassPool;
 import javassist.CtClass;
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.log4j.lf5.util.StreamUtils;
 import org.jetbrains.annotations.NotNull;
 
@@ -93,7 +98,30 @@ public class ForeignClassUtils {
     }
   }
 
-  private static Class<?>[] getClasses(Object[] constructorArgs) {
+  private static void getDependencyClassNames(ClassLoader loader, String classname, ClassPool pool, Set<String> foundClasses) throws Exception {
+    foundClasses.add(classname);
+    String internal = classNameToInternalName(classname);
+    InputStream resourceAsStream = loader.getResourceAsStream(internal);
+    try {
+      CtClass ctClass = pool.makeClass(resourceAsStream);
+      Collection<String> refClasses = ctClass.getRefClasses();
+      for (String refClass : refClasses) {
+        if (!foundClasses.contains(refClass)) {
+          getDependencyClassNames(loader, refClass, pool, foundClasses);
+        }
+      }
+    } catch (IOException e) {
+      System.out.println("Can't load" + classname);
+    }
+  }
+
+  private static Set<String> getDependencyClassNames(ClassLoader loader, String classname, ClassPool pool) throws Exception {
+    Set<String> result = Sets.newHashSet();
+    getDependencyClassNames(loader, classname, pool, result);
+    return result;
+  }
+
+  public static Class<?>[] getClasses(Object[] constructorArgs) {
     Class<?>[] constructorArgTypes = new Class[constructorArgs.length];
     for (int i = 0; i < constructorArgs.length; i++) {
       constructorArgTypes[i] = constructorArgs[i].getClass();
@@ -101,186 +129,52 @@ public class ForeignClassUtils {
     return constructorArgTypes;
   }
 
-
-  private static Class<?> load(ClassLoader loader, String canonicalName) throws ClassNotFoundException {
-    try {
-      return loader.loadClass(canonicalName);
-    } catch (ClassNotFoundException e) {
-      return loader.loadClass(makeInner(canonicalName));
-    }
-  }
-
-  private static String makeInner(String canonicalName) {
-    return replaceLast(canonicalName, ".", "$");
-  }
-
-  private static String replaceLast(String string, String substring, String replacement) {
-    int index = string.lastIndexOf(substring);
-    if (index == -1) {
-      return string;
-    }
-    return string.substring(0, index) + replacement
-        + string.substring(index + substring.length());
-  }
-
-  private static class SelectiveHandoffClassLoader extends ClassLoader {
-
-    private final ClassLoader alternate;
-    private final Map<String, byte[]> classDefinitions;
-    private final Set<String> knownParentClasses;
-
-
-    public SelectiveHandoffClassLoader(
-        ClassLoader parent,
-        ClassLoader alternate,
-        Map<String, byte[]> predefinedClasses) {
-      super(parent);
-      this.alternate = alternate;
-      this.classDefinitions = predefinedClasses;
-      this.knownParentClasses = Sets.newHashSet();
-    }
-
-    @Override
-    public Class<?> loadClass(String s) throws ClassNotFoundException {
-      if (classDefinitions.containsKey(s)) {
-        byte[] bytes = classDefinitions.get(s);
-        return this.defineClass(s, bytes, 0, bytes.length);
-      }
-      if (knownParentClasses.contains(s)) {
-        return this.loadClass(s, false);
-      }
-
-      if (alternate != null) {
-        try {
-          String internalName = classNameToInternalName(s);
-
-          InputStream alternateClassStream = alternate.getResourceAsStream(internalName);
-          InputStream standardClassStream = this.getResourceAsStream(internalName);
-
-          if (standardClassStream != null) {
-            return loadFromParent(s);
-          } else if (alternateClassStream != null) {
-            return loadAlternate(s, internalName);
-          } else {
-            throw new RuntimeException("Class not found " + s + " internal name: " + internalName);
-          }
-        } catch (ClassNotFoundException e) {
-          throw e;
-        } catch (Exception e) {
-          throw new RuntimeException(e);
-        }
-      } else {
-        return loadFromParent(s);
-
-      }
-    }
-
-    private Class loadFromParent(String s) throws ClassNotFoundException {
-      knownParentClasses.add(s);
-      return this.loadClass(s, true);
-    }
-
-    public Set<String> getKnownParentClasses() {
-      return knownParentClasses;
-    }
-
-    public Class<?> loadAlternate(String s, String internalName) throws IOException, ClassNotFoundException {
-      byte[] bytes = StreamUtils.getBytes(alternate.getResourceAsStream(internalName));
-      classDefinitions.put(s, bytes);
-      return alternate.loadClass(s);
-    }
-
-    public Map<String, byte[]> getClassDefinitions() {
-      return classDefinitions;
-    }
-  }
-
   @NotNull
-  private static String classNameToInternalName(String s) {
+  public static String classNameToInternalName(String s) {
     return s.replace('.', '/') + ".class";
-  }
-
-  private static class ForeignClassFactoryImpl<T> implements ForeignClassFactory<T> {
-
-    private final Map<String, byte[]> classDefs;
-    private final String className;
-    private final Object[] constructorArgs;
-
-    public ForeignClassFactoryImpl(Map<String, byte[]> classDefs, String className, Object[] constructorArgs) {
-      this.classDefs = classDefs;
-      this.className = className;
-      this.constructorArgs = constructorArgs;
-    }
-
-    @Override
-    public T createUsingStoredArgs() {
-      return createNewObject(constructorArgs);
-    }
-
-    public T createNewObject(Object... args) {
-      SelectiveHandoffClassLoader loader =
-          new SelectiveHandoffClassLoader(ClassLoader.getSystemClassLoader(),
-              null,
-              classDefs);
-      try {
-        Class<?> load = load(loader, className);
-        Object reloadedObject = load.getConstructor(getClasses(args)).newInstance(args);
-        return (T)reloadedObject;
-      } catch (ClassNotFoundException e) {
-        throw new RuntimeException(e);
-      } catch (InvocationTargetException e) {
-        throw new RuntimeException(e);
-      } catch (InstantiationException e) {
-        throw new RuntimeException(e);
-      } catch (NoSuchMethodException e) {
-        throw new RuntimeException(e);
-      } catch (IllegalAccessException e) {
-        throw new RuntimeException(e);
-      }
-    }
-
-
   }
 
   public static void main(String[] args) throws Exception {
 
-    ForeignClassFactory<Fn<OnlineImportRecord, AnonymousRecord>> factory = loadWithRedefs(
-        "com.liveramp.audience_compiler.converters.OnlineImportRecordToAnonymousRecord",
-        (Class<Fn<OnlineImportRecord, AnonymousRecord>>)(Class)Fn.class,
-        "/Users/pwestling/dev/audience_compiler/build/audience_compiler.job.jar",
-        123L);
+    String jsJar = "/Users/pwestling/dev/java_support/build/java_support.job.jar";
+    URLClassLoader js = new URLClassLoader(new URL[]{new File(jsJar).toURI().toURL()}, null);
 
-    Fn<OnlineImportRecord, AnonymousRecord> fn = factory.createUsingStoredArgs();
+    String acJar = "/Users/pwestling/dev/audience_compiler/build/audience_compiler.job.jar";
+    URLClassLoader ac = new URLClassLoader(new URL[]{new File(acJar).toURI().toURL()}, null);
 
-    OnlineImportRecord record = new OnlineImportRecord(
-        new ImportRecordID(1L, 1, 1L),
-        Maps.newHashMap(),
-        Lists.newArrayList(),
-        Lists.newArrayList());
-    AnonymousRecord result = fn.apply(record);
+    String fpJar = "/Users/pwestling/dev/field_preparation/field_preparation_executor/build/field_preparation_executor.job.jar";
+    URLClassLoader fp = new URLClassLoader(new URL[]{new File(fpJar).toURI().toURL()}, null);
 
-    System.out.println(result);
+    Set<String> deps = getDependencyClassNames(fp, "com.liveramp.field_preparation.workflow.PrepareFields", ClassPool.getDefault());
+    System.out.println(deps);
+    System.out.println(deps.size());
+    System.out.println();
 
-    ByteArrayOutputStream baos = new ByteArrayOutputStream();
-    ObjectOutputStream oos = new ObjectOutputStream(baos);
+    List<Pair<Integer, String>> orderdDeps = deps.stream()
+        .filter(n -> !n.contains("generated"))
+        .filter(n -> !n.contains("com.rapleaf.types"))
+        .filter(n -> !n.contains("com.liveramp.types"))
+        .filter(n -> !n.contains("db_schemas"))
+        .filter(n -> !n.contains("cascading_ext"))
+        .filter(n -> !n.contains("cascading_tools"))
+        .filter(n -> !n.contains("hadoop"))
+        .filter(n -> !n.contains("java"))
+        .filter(n -> !n.contains("sun"))
+        .filter(n -> !n.contains("cascading"))
+        .filter(n -> !n.contains("com.rapleaf.formats"))
+        .map(s -> {
+          try {
+            return Pair.of(StreamUtils.getBytes(ac.getResourceAsStream(classNameToInternalName(s))).length, s);
+          } catch (Exception e) {
+            return Pair.of(0, s);
+          }
 
-    oos.writeObject(factory);
+        }).sorted((o1, o2) -> o2.getKey().compareTo(o1.getKey()))
+        .collect(Collectors.toList());
 
-    oos.close();
 
-    byte[] bytes = baos.toByteArray();
-    System.out.println(bytes.length);
+    System.out.println(orderdDeps);
+    System.out.println(orderdDeps.stream().map(Pair::getKey).reduce(0, (x, y) -> x + y));
 
-    ByteArrayInputStream bais = new ByteArrayInputStream(bytes);
-
-    ObjectInputStream ois = new ObjectInputStream(bais);
-
-    Object o = ois.readObject();
-
-    Fn<OnlineImportRecord, AnonymousRecord> f = ((ForeignClassFactory<Fn<OnlineImportRecord, AnonymousRecord>>)o).createUsingStoredArgs();
-    AnonymousRecord result2 = f.apply(record);
-
-    System.out.println(result2);
   }
-
 }
