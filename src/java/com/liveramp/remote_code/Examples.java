@@ -2,8 +2,12 @@ package com.liveramp.remote_code;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
+import java.net.URL;
+import java.net.URLClassLoader;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -34,10 +38,57 @@ public class Examples {
 
     System.out.println(result);
 
+    Object o = passThroughSerialization(factory);
+
+    Fn<OnlineImportRecord, AnonymousRecord> f = ((ForeignClassFactory<Fn<OnlineImportRecord, AnonymousRecord>>)o).createUsingStoredArgs();
+    AnonymousRecord result2 = f.apply(record);
+
+    System.out.println(result2);
+  }
+
+  public static void example2(String[] args) throws Exception {
+
+    String acJar = "/Users/pwestling/dev/audience_compiler/build/audience_compiler.job.jar";
+    URLClassLoader ac = new URLClassLoader(new URL[]{new File(acJar).toURI().toURL()}, null);
+    String cn = "com.liveramp.audience_compiler.converters.OnlineImportRecordToAnonymousRecord";
+
+    RemoteCodeObject<Fn<OnlineImportRecord, AnonymousRecord>> rco =
+        RemoteCodeObject.toRemoteCodeObject(cn, ac, 123L);
+
+    Fn<OnlineImportRecord, AnonymousRecord> fn = rco.deserialize();
+
+    OnlineImportRecord record = new OnlineImportRecord(
+        new ImportRecordID(1L, 1, 1L),
+        Maps.newHashMap(),
+        Lists.newArrayList(),
+        Lists.newArrayList());
+    AnonymousRecord result = fn.apply(record);
+
+    System.out.println(result);
+
+    Fn<OnlineImportRecord, AnonymousRecord> proxy = rco.toProxy(Fn.class);
+    result = proxy.apply(record);
+    System.out.println(result);
+
+    proxy = Examples.passThroughSerialization(proxy);
+    result = proxy.apply(record);
+    System.out.println(result);
+
+    try {
+      fn = Examples.passThroughSerialization(fn);
+
+      throw new RuntimeException("Something magical happened and this worked when it shouldn't have");
+    } catch (ClassNotFoundException e) {
+      //doesnt work because bytecode isnt also passed
+    }
+
+  }
+
+  public static <T> T passThroughSerialization(T obj) throws IOException, ClassNotFoundException {
     ByteArrayOutputStream baos = new ByteArrayOutputStream();
     ObjectOutputStream oos = new ObjectOutputStream(baos);
 
-    oos.writeObject(factory);
+    oos.writeObject(obj);
 
     oos.close();
 
@@ -48,12 +99,7 @@ public class Examples {
 
     ObjectInputStream ois = new ObjectInputStream(bais);
 
-    Object o = ois.readObject();
-
-    Fn<OnlineImportRecord, AnonymousRecord> f = ((ForeignClassFactory<Fn<OnlineImportRecord, AnonymousRecord>>)o).createUsingStoredArgs();
-    AnonymousRecord result2 = f.apply(record);
-
-    System.out.println(result2);
+    return (T)ois.readObject();
   }
 
 }

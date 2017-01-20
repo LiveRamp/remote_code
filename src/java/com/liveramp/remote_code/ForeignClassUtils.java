@@ -1,22 +1,16 @@
 package com.liveramp.remote_code;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.TreeMap;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -26,11 +20,6 @@ import javassist.CtClass;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.log4j.lf5.util.StreamUtils;
 import org.jetbrains.annotations.NotNull;
-
-import com.liveramp.importer.generated.ImportRecordID;
-import com.liveramp.importer.generated.OnlineImportRecord;
-import com.liveramp.java_support.functional.Fn;
-import com.liveramp.types.anonymous_records.AnonymousRecord;
 
 public class ForeignClassUtils {
 
@@ -83,7 +72,7 @@ public class ForeignClassUtils {
     return new ForeignClassFactoryImpl<T>(foreignLoader.getClassDefinitions(), className, constructorArgs);
   }
 
-  private static void loadHierarchy(SelectiveHandoffClassLoader loader, ClassLoader alternate, String classname, ClassPool pool) throws Exception {
+  public static void loadHierarchy(SelectiveHandoffClassLoader loader, ClassLoader alternate, String classname, ClassPool pool) throws Exception {
     loader.loadClass(classname);
     String internal = classNameToInternalName(classname);
     InputStream resourceAsStream = alternate.getResourceAsStream(internal);
@@ -98,7 +87,8 @@ public class ForeignClassUtils {
     }
   }
 
-  private static void getDependencyClassNames(ClassLoader loader, String classname, ClassPool pool, Set<String> foundClasses) throws Exception {
+  public static void operateOnDependencies(ClassLoader loader, String classname, ClassPool pool, Set<String> foundClasses, Consumer<String> consumer) throws Exception {
+    consumer.accept(classname);
     foundClasses.add(classname);
     String internal = classNameToInternalName(classname);
     InputStream resourceAsStream = loader.getResourceAsStream(internal);
@@ -107,17 +97,35 @@ public class ForeignClassUtils {
       Collection<String> refClasses = ctClass.getRefClasses();
       for (String refClass : refClasses) {
         if (!foundClasses.contains(refClass)) {
-          getDependencyClassNames(loader, refClass, pool, foundClasses);
+          operateOnDependencies(loader, refClass, pool, foundClasses, consumer);
         }
       }
     } catch (IOException e) {
-      System.out.println("Can't load" + classname);
+      //ignore
     }
   }
 
-  private static Set<String> getDependencyClassNames(ClassLoader loader, String classname, ClassPool pool) throws Exception {
+  public static void operateOnDependencies(ClassLoader loader, String classname, ClassPool pool, Consumer<String> consumer) throws Exception {
+    operateOnDependencies(loader, classname, pool, Sets.newHashSet(), consumer);
+  }
+
+  public static Set<String> getDependencyClasses(ClassLoader loader, String classname, ClassPool pool) throws Exception {
     Set<String> result = Sets.newHashSet();
-    getDependencyClassNames(loader, classname, pool, result);
+    operateOnDependencies(loader, classname, pool, result::add);
+    return result;
+  }
+
+  public static Map<String, byte[]> getDependencyBytecode(ClassLoader loader, String classname, ClassPool pool, Set<String> packagesToExclude) throws Exception {
+    Map<String, byte[]> result = Maps.newHashMap();
+    operateOnDependencies(loader, classname, pool, s -> {
+      try {
+        if (packagesToExclude.stream().noneMatch(s::contains)) {
+          result.put(s, StreamUtils.getBytes(loader.getResourceAsStream(classNameToInternalName(s))));
+        }
+      } catch (IOException | NullPointerException e) {
+        //class is not in this jar - this is actually generally fine
+      }
+    });
     return result;
   }
 
@@ -145,36 +153,21 @@ public class ForeignClassUtils {
     String fpJar = "/Users/pwestling/dev/field_preparation/field_preparation_executor/build/field_preparation_executor.job.jar";
     URLClassLoader fp = new URLClassLoader(new URL[]{new File(fpJar).toURI().toURL()}, null);
 
-    Set<String> deps = getDependencyClassNames(fp, "com.liveramp.field_preparation.workflow.PrepareFields", ClassPool.getDefault());
-    System.out.println(deps);
+    Map<String, byte[]> deps = getDependencyBytecode(fp, "com.liveramp.field_preparation.workflow.PrepareFields", ClassPool.getDefault(),
+        Sets.newHashSet(
+            "generated",
+            "com.rapleaf.types",
+            "com.liveramp.types",
+            "db_schemas",
+            "cascading",
+            "java",
+            "sun",
+            "com.rapleaf.formats"
+        ));
     System.out.println(deps.size());
-    System.out.println();
-
-    List<Pair<Integer, String>> orderdDeps = deps.stream()
-        .filter(n -> !n.contains("generated"))
-        .filter(n -> !n.contains("com.rapleaf.types"))
-        .filter(n -> !n.contains("com.liveramp.types"))
-        .filter(n -> !n.contains("db_schemas"))
-        .filter(n -> !n.contains("cascading_ext"))
-        .filter(n -> !n.contains("cascading_tools"))
-        .filter(n -> !n.contains("hadoop"))
-        .filter(n -> !n.contains("java"))
-        .filter(n -> !n.contains("sun"))
-        .filter(n -> !n.contains("cascading"))
-        .filter(n -> !n.contains("com.rapleaf.formats"))
-        .map(s -> {
-          try {
-            return Pair.of(StreamUtils.getBytes(ac.getResourceAsStream(classNameToInternalName(s))).length, s);
-          } catch (Exception e) {
-            return Pair.of(0, s);
-          }
-
-        }).sorted((o1, o2) -> o2.getKey().compareTo(o1.getKey()))
-        .collect(Collectors.toList());
 
 
-    System.out.println(orderdDeps);
-    System.out.println(orderdDeps.stream().map(Pair::getKey).reduce(0, (x, y) -> x + y));
+    System.out.println(deps.values().stream().map(b -> b.length).reduce(0, (x, y) -> x + y));
 
   }
 }
