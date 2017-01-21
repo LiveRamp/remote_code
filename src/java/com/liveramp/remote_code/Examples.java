@@ -46,6 +46,9 @@ public class Examples {
     System.out.println(result2);
   }
 
+  //Big difference with RCO is that is holds an actual serialized version of the object
+  //so the supplying code could do intial setup or configuration or whatever it wants
+  //It also has the "toProxy" method for creating a serializable object of the target type
   public static void example2(String[] args) throws Exception {
 
     String acJar = "/Users/pwestling/dev/audience_compiler/build/audience_compiler.job.jar";
@@ -71,6 +74,7 @@ public class Examples {
     System.out.println(result);
 
     proxy = Examples.passThroughSerialization(proxy);
+    //"apply" here goes through a MethodInterceptor, so there's some (probably very small) loss of performance
     result = proxy.apply(record);
     System.out.println(result);
 
