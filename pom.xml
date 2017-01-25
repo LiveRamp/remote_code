@@ -1,4 +1,6 @@
-<?xml version="1.0" encoding="UTF-8"?><project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
   <!--TODO replace with your project name-->
@@ -7,26 +9,22 @@
 
   <parent>
     <groupId>com.liveramp</groupId>
-    <artifactId>pom-hadoop-common</artifactId>
+    <artifactId>pom-ant-structure</artifactId>
     <version>1.0-SNAPSHOT</version>
   </parent>
 
-  <!--TODO if your project needs rldb set up for builds. remove this block and uncomment the db_schemas dependency below-->
   <properties>
     <skip.db.init>false</skip.db.init>
   </properties>
 
   <dependencies>
-    <!--TODO add project dependencies here-->
 
-    <!--TODO if your project will need a database setup for builds, uncomment this-->
-    <!--<dependency>-->
-      <!--<groupId>com.liveramp</groupId>-->
-      <!--<artifactId>db_schemas</artifactId>-->
-      <!--<version>1.0-SNAPSHOT</version>-->
-    <!--</dependency>-->
+    <dependency>
+      <groupId>org.jsoup</groupId>
+      <artifactId>jsoup</artifactId>
+    </dependency>
 
-  <dependency>
+    <dependency>
       <groupId>com.liveramp</groupId>
       <artifactId>db_schemas</artifactId>
       <version>1.0-SNAPSHOT</version>
@@ -41,12 +39,26 @@
       <artifactId>cglib-nodep</artifactId>
       <version>3.1</version>
     </dependency>
+
+
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-log4j12</artifactId>
+      <version>1.7.2</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+      <version>1.7.2</version>
+    </dependency>
+
   </dependencies>
 
   <repositories>
     <repository>
       <id>all-snapshots</id>
-      <url>http://artifactory.liveramp.net/artifactory/all-snapshots</url>
+      <url>http://library.liveramp.net/artifactory/all-snapshots</url>
       <snapshots>
         <enabled>true</enabled>
         <updatePolicy>always</updatePolicy>
