@@ -16,13 +16,13 @@ import com.liveramp.commons.Accessors;
 public class ArtifactoryUtil {
 
   public static void main(String[] args) throws IOException {
-    System.out.println(getLatestSnapshotArtifact("com.liveramp", "pipeline_composer", "1.0-SNAPSHOT"));;
+    System.out.println(getLatestSnapshotJobjar("com.liveramp", "pipeline_composer", "1.0-SNAPSHOT"));;
   }
 
   private static final String ARTIFACTORY_URL = "http://library.liveramp.net/artifactory/libs-snapshot-local";
-  private static final Pattern SNAPSHOT_ARTIFACT_PATTERN = Pattern.compile("[a-z_A-Z0-9]+-[0-9.]+-([0-9.]+)-[0-9]+.jar");
+  private static final Pattern SNAPSHOT_ARTIFACT_PATTERN = Pattern.compile("[a-z_A-Z0-9]+-[0-9.]+-([0-9.]+)-[0-9]+.job.jar");
 
-  public static URL getLatestSnapshotArtifact(String org, String artifact, String version) throws IOException {
+  public static URL getLatestSnapshotJobjar(String org, String artifact, String version) throws IOException {
 
     String pathString = org.replaceAll("\\.", "/");
     String rootDir = ARTIFACTORY_URL + "/" + pathString + "/" + artifact + "/" + version;
@@ -37,7 +37,7 @@ public class ArtifactoryUtil {
 
     Collections.sort(versions);
 
-    return new URL(rootDir+"/"+Accessors.last(versions)+".jar");
+    return new URL(rootDir+"/"+Accessors.last(versions)+".job.jar");
   }
 
 }
