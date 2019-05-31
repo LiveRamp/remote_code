@@ -3,17 +3,14 @@ package com.liveramp.remote_code;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Arrays;
-import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import com.google.common.collect.Sets;
-import org.apache.log4j.lf5.util.StreamUtils;
+import org.apache.commons.io.IOUtils;
 
-import com.liveramp.java_support.functional.Fns8;
 
 class ForeignBytecodeClassloader extends ClassLoader {
 
@@ -60,7 +57,7 @@ class ForeignBytecodeClassloader extends ClassLoader {
             String internalName = ForeignClassUtils.classNameToInternalName(classname);
             InputStream resourceAsStream = parent.getResourceAsStream(internalName);
             return resourceAsStream == null ||
-                !Arrays.equals(StreamUtils.getBytes(resourceAsStream), e.getValue());
+                !Arrays.equals(IOUtils.toByteArray(resourceAsStream), e.getValue());
 
           } catch (IOException e1) {
             throw new RuntimeException(e1);
@@ -73,7 +70,7 @@ class ForeignBytecodeClassloader extends ClassLoader {
     // or a sibling class needs foreign code)
     Map<String, byte[]> classesWithDifferentBytecode = classDefinitions.entrySet().stream()
         .filter(e -> foreignOuterClasses.contains(toOuter.apply(e)))
-        .collect(Fns8.toMap());
+        .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
 
     return new ForeignBytecodeClassloader(parent, classesWithDifferentBytecode);
   }

@@ -1,34 +1,33 @@
 package com.liveramp.remote_code;
 
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.ObjectOutputStream;
 import java.io.ObjectStreamException;
 import java.io.Serializable;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import javassist.ClassPool;
 import net.sf.cglib.proxy.Enhancer;
 import net.sf.cglib.proxy.MethodInterceptor;
 import net.sf.cglib.proxy.MethodProxy;
+import org.apache.commons.lang3.SerializationUtils;
 
 public class RemoteCodeObject<T extends Serializable> implements Serializable {
 
   private final Map<String, byte[]> classDefinitions;
-  private final String classname;
   private final byte[] serializedObject;
   private transient T obj;
 
-  public RemoteCodeObject(Map<String, byte[]> classDefinitions, String classname, byte[] serializedObject) {
+  public RemoteCodeObject(Map<String, byte[]> classDefinitions, byte[] serializedObject) {
     this.classDefinitions = classDefinitions;
-    this.classname = classname;
     this.serializedObject = serializedObject;
   }
 
-
-  public T deserialize() throws IOException {
+  private void deserialize() throws IOException {
     if (obj == null) {
       ForeignBytecodeClassloader loader =
           new ForeignBytecodeClassloader(getLocalLoader(), classDefinitions);
@@ -42,7 +41,6 @@ public class RemoteCodeObject<T extends Serializable> implements Serializable {
         throw new RuntimeException(e);
       }
     }
-    return obj;
   }
 
   public T toProxy(Class<? super T> tClass) throws ObjectStreamException {
@@ -59,7 +57,7 @@ public class RemoteCodeObject<T extends Serializable> implements Serializable {
 
     private final RemoteCodeObject rco;
 
-    public RCOInterceptor(RemoteCodeObject rco) {
+    RCOInterceptor(RemoteCodeObject rco) {
       this.rco = rco;
     }
 
@@ -77,31 +75,58 @@ public class RemoteCodeObject<T extends Serializable> implements Serializable {
     return Thread.currentThread().getContextClassLoader();
   }
 
+  public static <T extends Serializable> Builder<T> builder(T obj) {
+    return new Builder<>(obj);
+  }
+
   public static <T extends Serializable> RemoteCodeObject<T> toRemoteCodeObject(T obj) throws Exception {
-    return toRemoteCodeObject(obj, getLocalLoader());
+    return builder(obj).build();
   }
 
-  public static <T extends Serializable> RemoteCodeObject<T> toRemoteCodeObject(String classname, ClassLoader loader, Object... args) throws Exception {
-    T obj = (T)loader.loadClass(classname)
-        .getConstructor(ForeignClassUtils.getClasses(args)).newInstance(args);
-    return toRemoteCodeObject(obj, loader);
-  }
-
-  public static <T extends Serializable> RemoteCodeObject<T> toRemoteCodeObject(T obj, ClassLoader loader) throws Exception {
+  public static <T extends Serializable> RemoteCodeObject<T> toRemoteCodeObject(T obj, ClassLoader loader, List<Pattern> exclusions) throws Exception {
 
     String className = obj.getClass().getCanonicalName();
     Map<String, byte[]> dependencyBytecode = ForeignClassUtils.getDependencyBytecode(
         loader,
         className,
         ClassPool.getDefault(),
-        LRRemoteCodeConstants.DEFAULT_EXCLUSIONS);
+        exclusions);
 
-    ByteArrayOutputStream baos = new ByteArrayOutputStream();
-    ObjectOutputStream oos = new ObjectOutputStream(baos);
-    oos.writeObject(obj);
-    oos.close();
-    byte[] serializedObj = baos.toByteArray();
+    byte[] serializedObj = SerializationUtils.serialize(obj);
 
-    return new RemoteCodeObject<T>(dependencyBytecode, className, serializedObj);
+    return new RemoteCodeObject<>(dependencyBytecode, serializedObj);
+  }
+
+  public static class Builder<T extends Serializable> {
+    List<Pattern> exclusions = new ArrayList<>();
+    ClassLoader classLoader = getLocalLoader();
+    T obj;
+
+    public Builder(T object) {
+      // default exclusions - use
+      // toRemoteCodeObject(T obj, ClassLoader loader, List<Pattern> exclusions) for full control
+      exclusions.add(Pattern.compile("sun.*"));
+      exclusions.add(Pattern.compile("java.*"));
+      obj = object;
+    }
+
+    public Builder<T> addExclusion(String regex) {
+      exclusions.add(Pattern.compile(regex));
+      return this;
+    }
+
+    public Builder<T> addExclusion(Pattern regex) {
+      exclusions.add(regex);
+      return this;
+    }
+
+    public Builder<T> setClassLoader(ClassLoader classLoader) {
+      this.classLoader = classLoader;
+      return this;
+    }
+
+    public RemoteCodeObject<T> build() throws Exception {
+      return RemoteCodeObject.toRemoteCodeObject(obj, classLoader, exclusions);
+    }
   }
 }
