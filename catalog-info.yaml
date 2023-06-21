@@ -1,0 +1,12 @@
+# BEGIN TERRAFORM MANAGED BLOCK
+"apiVersion": "backstage.io/v1alpha1"
+"kind": "Location"
+"metadata":
+  "annotations":
+    "github.com/project-slug": "LiveRamp/remote_code"
+  "description": "Experimental library for serializing and transmitting objects and
+    their bytecode"
+  "name": "remote_code"
+  "tags": []
+"spec": {}
+# END TERRAFORM MANAGED BLOCK
